@@ -303,13 +303,13 @@ impl Application {
     ) -> Subbuffer<[Vertex]> {
         let vertices = [
             Vertex {
-                position: [-0.5, -0.25],
+                position: [0.0, -1.0],
             },
             Vertex {
-                position: [0.0, 0.5],
+                position: [-1.0, 1.0],
             },
             Vertex {
-                position: [0.25, -0.1],
+                position: [1.0, 1.0],
             },
         ];
         let vertex_buffer = Buffer::from_iter(
@@ -589,7 +589,7 @@ impl Application {
                             //
                             // Only attachments that have `LoadOp::Clear` are provided with clear
                             // values, any others should use `ClearValue::None` as the clear value.
-                            clear_values: vec![Some([0.0, 0.0, 1.0, 1.0].into())],
+                            clear_values: vec![Some([0.3, 0.1, 0.6, 1.0].into())],
 
                             ..RenderPassBeginInfo::framebuffer(
                                 self.framebuffers[image_index as usize].clone(),
