@@ -7,7 +7,7 @@ use vulkano::{
     },
     device::{
         physical::PhysicalDeviceType, Device, DeviceCreateInfo, DeviceExtensions, QueueCreateInfo,
-        QueueFlags,
+        QueueFlags, Queue,
     },
     image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
     instance::{Instance, InstanceCreateInfo},
@@ -40,12 +40,24 @@ const HEIGHT: u32 = 600;
 
 struct Application {
     instance: Arc<Instance>,
+    surface: Arc<Surface>,
+    device: Arc<Device>,
+    queue: Arc<Queue>
 }
 
 impl Application {
     pub fn init() -> (Self, EventLoop<()>) {
         let instance = Self::create_instance();
         let (events_loop, surface) = Self::init_window(&instance);
+        let (device, queue) = Self::choose_gpu(&instance, &surface);
+        (
+            Self { 
+                instance, surface, device, queue 
+            }, 
+                events_loop)
+    }
+
+    fn choose_gpu(instance: &Arc<Instance>, surface: &Arc<Surface>) -> (Arc<Device>, Arc<Queue>){
         let device_extensions = DeviceExtensions {
             khr_swapchain: true,
             ..DeviceExtensions::empty()
@@ -111,7 +123,32 @@ impl Application {
             physical_device.properties().device_name,
             physical_device.properties().device_type,
         );
-        (Self { instance }, events_loop)
+        let (device, mut queues) = Device::new(
+            // Which physical device to connect to.
+            physical_device,
+            DeviceCreateInfo {
+                // A list of optional features and extensions that our program needs to work correctly.
+                // Some parts of the Vulkan specs are optional and must be enabled manually at device
+                // creation. In this example the only thing we are going to need is the `khr_swapchain`
+                // extension that allows us to draw to a window.
+                enabled_extensions: device_extensions,
+    
+                // The list of queues that we are going to use. Here we only use one queue, from the
+                // previously chosen queue family.
+                queue_create_infos: vec![QueueCreateInfo {
+                    queue_family_index,
+                    ..Default::default()
+                }],
+    
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        // Since we can request multiple queues, the `queues` variable is in fact an iterator. We only
+        // use one queue in this example, so we just retrieve the first and only element of the
+        // iterator.
+        let queue = queues.next().unwrap();
+        (device, queue)
     }
 
     fn create_instance() -> Arc<Instance> {
