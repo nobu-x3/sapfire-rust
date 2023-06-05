@@ -10,7 +10,13 @@ use vulkano::{
         QueueCreateInfo, QueueFlags,
     },
     image::{view::ImageView, ImageAccess, ImageUsage, SwapchainImage},
-    instance::{Instance, InstanceCreateInfo},
+    instance::{
+        debug::{
+            DebugUtilsMessageSeverity, DebugUtilsMessageType, DebugUtilsMessenger,
+            DebugUtilsMessengerCreateInfo,
+        },
+        Instance, InstanceCreateInfo, LayerProperties,
+    },
     memory::allocator::{
         AllocationCreateInfo, FreeListAllocator, GenericMemoryAllocator, MemoryAllocator,
         MemoryUsage, StandardMemoryAllocator,
@@ -69,7 +75,7 @@ struct Application {
 
 impl Application {
     pub fn init() -> (Self, EventLoop<()>) {
-        let instance = Self::create_instance();
+        let (instance, debug_callback) = Self::create_instance();
         let (events_loop, surface) = Self::init_window(&instance);
         let (device, queue) = Self::choose_gpu(&instance, &surface);
         let (swapchain, images) = Self::create_swapchain(&device, &surface);
@@ -112,21 +118,112 @@ impl Application {
         )
     }
 
-    fn create_instance() -> Arc<Instance> {
+    fn create_instance() -> (Arc<Instance>, Option<DebugUtilsMessenger>) {
         let library = VulkanLibrary::new().unwrap();
-        let required_extensions = vulkano_win::required_extensions(&library);
-        let instance = Instance::new(
-            library,
-            InstanceCreateInfo {
+        let mut required_extensions = vulkano_win::required_extensions(&library);
+        let layers = library.layer_properties().unwrap();
+        println!("Supported layers:");
+        layers.for_each(|l| println!("{}", l.name()));
+        println!("No valid");
+        let no_valid: Vec<LayerProperties> = library
+            .layer_properties()
+            .unwrap()
+            .filter(|s| s.name() != "VK_LAYER_KHRONOS_validation")
+            .collect();
+        // .for_each(|s| println!("{}", s.name()));
+
+        // TODO: handle validation layers in release builds
+        let instance = {
+            #[cfg(not(debug_assertions))]
+            {
+                Instance::new(
+                    library,
+                    InstanceCreateInfo {
                 enabled_extensions: required_extensions,
+                #[cfg(target_os = "macos")]
                 // Enable enumerating devices that use non-conformant Vulkan implementations. (e.g.
                 // MoltenVK)
                 enumerate_portability: true,
+
                 ..Default::default()
             },
-        )
-        .unwrap();
-        instance
+                )
+                .unwrap()
+            }
+
+            #[cfg(debug_assertions)]
+            {
+                required_extensions.ext_debug_utils = true;
+                Instance::new(
+                    library,
+                    InstanceCreateInfo {
+                enabled_extensions: required_extensions,
+                // enabled_layers: no_valid.iter().map(|l| l.name().to_owned()).collect(),
+                // enabled_layers: vec!["VK_LAYER_KHRONOS_validation".to_owned()],
+                #[cfg(target_os = "macos")]
+                // Enable enumerating devices that use non-conformant Vulkan implementations. (e.g.
+                // MoltenVK)
+                enumerate_portability: true,
+
+                ..Default::default()
+            },
+                )
+                .unwrap()
+            }
+        };
+        let debug_callback = unsafe {
+            let callback = DebugUtilsMessenger::new(
+                instance.clone(),
+                DebugUtilsMessengerCreateInfo {
+                    message_severity: DebugUtilsMessageSeverity::ERROR
+                        | DebugUtilsMessageSeverity::WARNING
+                        | DebugUtilsMessageSeverity::INFO
+                        | DebugUtilsMessageSeverity::VERBOSE,
+                    message_type: DebugUtilsMessageType::GENERAL
+                        | DebugUtilsMessageType::VALIDATION
+                        | DebugUtilsMessageType::PERFORMANCE,
+                    ..DebugUtilsMessengerCreateInfo::user_callback(Arc::new(|msg| {
+                        let severity = if msg.severity.intersects(DebugUtilsMessageSeverity::ERROR)
+                        {
+                            "error"
+                        } else if msg.severity.intersects(DebugUtilsMessageSeverity::WARNING) {
+                            "warning"
+                        } else if msg.severity.intersects(DebugUtilsMessageSeverity::INFO) {
+                            "information"
+                        } else if msg.severity.intersects(DebugUtilsMessageSeverity::VERBOSE) {
+                            "verbose"
+                        } else {
+                            panic!("no-impl");
+                        };
+
+                        let ty = if msg.ty.intersects(DebugUtilsMessageType::GENERAL) {
+                            "general"
+                        } else if msg.ty.intersects(DebugUtilsMessageType::VALIDATION) {
+                            "validation"
+                        } else if msg.ty.intersects(DebugUtilsMessageType::PERFORMANCE) {
+                            "performance"
+                        } else {
+                            panic!("no-impl");
+                        };
+
+                        println!(
+                            "{} {} {}: {}",
+                            msg.layer_prefix.unwrap_or("unknown"),
+                            ty,
+                            severity,
+                            msg.description
+                        );
+                    }))
+                },
+            )
+            .ok();
+            #[cfg(not(debug_assertions))]
+            {
+                let callback = None;
+            }
+            callback
+        };
+        (instance, debug_callback)
     }
 
     fn init_window(instance: &Arc<Instance>) -> (EventLoop<()>, Arc<Surface>) {
@@ -334,9 +431,9 @@ impl Application {
                 ty: "vertex",
                 src: r"
                     #version 450
-    
+
                     layout(location = 0) in vec2 position;
-    
+
                     void main() {
                         gl_Position = vec4(position, 0.0, 1.0);
                     }
@@ -349,9 +446,9 @@ impl Application {
                 ty: "fragment",
                 src: r"
                     #version 450
-    
+
                     layout(location = 0) out vec4 f_color;
-    
+
                     void main() {
                         f_color = vec4(1.0, 0.0, 0.0, 1.0);
                     }
